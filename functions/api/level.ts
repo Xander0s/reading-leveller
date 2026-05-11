@@ -1,4 +1,4 @@
-import { RUBRIC, type YearRubric } from '../../src/generated/rubric';
+import { buildRubricText } from '../../src/lib/rubric';
 
 interface Env {
   ANTHROPIC_API_KEY: string;
@@ -9,7 +9,7 @@ interface Env {
 interface RequestBody {
   imageBase64: string;
   imageMediaType: 'image/jpeg' | 'image/png' | 'image/webp';
-  yearLevel: 'F' | '1' | '2' | '3' | '4' | '5' | '6';
+  textTitle?: string;
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
@@ -28,22 +28,20 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
-  if (!body.imageBase64 || !body.imageMediaType || !body.yearLevel) {
-    return json({ error: 'Missing imageBase64, imageMediaType, or yearLevel' }, 400);
+  if (!body.imageBase64 || !body.imageMediaType) {
+    return json({ error: 'Missing imageBase64 or imageMediaType' }, 400);
   }
 
-  // Cap payload at ~5MB base64 (~3.7MB image). Larger images should be
-  // resized client-side; this guards the Worker quota.
   if (body.imageBase64.length > 5 * 1024 * 1024) {
     return json({ error: 'Image too large; please retake or use a smaller file' }, 413);
   }
 
-  const yearRubric = RUBRIC.years.find((y) => y.yearCode === body.yearLevel);
-  const systemPrompt = buildSystemPrompt(yearRubric);
+  const systemPrompt = buildSystemPrompt();
+  const userPrompt = buildUserPrompt(body.textTitle);
 
   const anthropicPayload = {
     model: env.ANTHROPIC_MODEL ?? DEFAULT_MODEL,
-    max_tokens: 1500,
+    max_tokens: 2000,
     system: [
       {
         type: 'text',
@@ -63,10 +61,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
               data: body.imageBase64,
             },
           },
-          {
-            type: 'text',
-            text: buildUserPrompt(body.yearLevel),
-          },
+          { type: 'text', text: userPrompt },
         ],
       },
     ],
@@ -118,10 +113,7 @@ export const onRequestOptions: PagesFunction<Env> = async ({ env }) => {
 function json(payload: unknown, status: number, allowed?: string): Response {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: {
-      'content-type': 'application/json',
-      ...corsHeaders(allowed),
-    },
+    headers: { 'content-type': 'application/json', ...corsHeaders(allowed) },
   });
 }
 
@@ -133,55 +125,50 @@ function corsHeaders(origin?: string): Record<string, string> {
   };
 }
 
-function buildSystemPrompt(yearRubric: YearRubric | undefined): string {
-  const yearLabel = yearRubric?.yearLabel ?? '(unspecified)';
-  const tierBlock = yearRubric
-    ? yearRubric.tiers
-        .map(
-          (t) =>
-            `### ${t.label} (${t.tier})\n` +
-            t.descriptors.map((d) => `- ${d}`).join('\n'),
-        )
-        .join('\n\n')
-    : '_No rubric loaded — fall back to general Victorian Curriculum 2.0 English standards for the target year level._';
+function buildSystemPrompt(): string {
+  return `You are an assistant for primary-school teachers in a Victorian (Australian) school, applying the school's "Resource Organisation Process" rubric to a photographed page from a text.
 
-  return `You are a reading-levelling assistant for Australian primary teachers (Prep–Year 6, Victorian Curriculum 2.0).
+Your job is to:
 
-You receive a photo of a single page from a text and a target year level. Your job is to:
+1. **Transcribe** the visible text faithfully. Preserve paragraphs and punctuation. Skip page numbers, captions, and decorative elements. Mark illegible spans with [...]. If the page is mostly an illustration, transcribe whatever text is present and note in warnings.
 
-1. Transcribe the visible text faithfully (preserve paragraphs and punctuation; skip captions and page numbers; mark illegible spans with […]).
-2. Estimate a **Lexile measure** for the transcribed text. Use sentence length, word frequency, syntactic complexity, and concept density. Provide a numeric estimate (or a "BR…L" band for very early texts) and a one-sentence rationale.
-3. Assign a **rubric tier** (below / at / above) for the target year level using the rubric below. Provide the human-readable tier label, a 2–3 sentence rationale, and 2–4 short evidence quotes (≤120 chars each) from the transcript.
-4. Add brief warnings only if the image is partial, glare-affected, or the text appears to be a non-narrative format that may skew Lexile (e.g., poem, list).
+2. Rate the text on **three independent demand dimensions**, each on a 3-point scale (L / M / H). Use the rubric below verbatim. **These are independent — do not let one rating influence another.** A text can be Low Decoding and High Knowledge, or vice versa. The ratings characterise demand, NOT quality, NOT year-level fit.
+
+3. For each dimension, give a concise rationale (2–3 sentences) and 2–4 short pieces of evidence from the transcript (≤120 chars each — direct quotes preferred).
+
+4. Provide a **Lexile** estimate only as a secondary signal. The school's stance: Lexile is only useful when D/L/K cannot be differentiated. Always include the rubric's note about Lexile in the \`lexile.note\` field. If you can reasonably estimate, give a number (or "BR…L" band for very early texts); otherwise set \`lexile.estimate\` to null and explain in the note.
+
+5. Warnings (optional): only if the image is partial, glare-affected, mostly illustration, or the format may skew the analysis (e.g. poem, instructions, list).
 
 **Output strict JSON, no prose, no markdown fences.** Schema:
 {
+  "textTitle": string | null,
   "transcript": string,
-  "lexile": { "estimate": number, "band": string, "rationale": string },
-  "rubric": {
-    "tier": "below" | "at" | "above",
-    "tierLabel": string,
-    "rationale": string,
-    "evidence": string[]
+  "dimensions": {
+    "decoding":  { "rating": "L" | "M" | "H", "rationale": string, "evidence": string[] },
+    "language":  { "rating": "L" | "M" | "H", "rationale": string, "evidence": string[] },
+    "knowledge": { "rating": "L" | "M" | "H", "rationale": string, "evidence": string[] }
   },
+  "lexile": { "estimate": number | null, "band": string | null, "note": string },
   "warnings"?: string[]
 }
 
----
-
-**Rubric for ${yearLabel}:**
-
-${tierBlock}
+Australian English spelling. Be concise — teachers read this on a phone between lessons.
 
 ---
 
-Australian English spelling. Be concise — teachers read this on a phone between lessons.`;
+# Rubric — "Resource Organisation Process" (school document)
+
+${buildRubricText()}
+`;
 }
 
-function buildUserPrompt(year: RequestBody['yearLevel']): string {
-  const yearLabel =
-    year === 'F' ? 'Prep (Foundation)' : `Year ${year}`;
-  return `Target year level: ${yearLabel}.\n\nTranscribe the page, estimate Lexile, and assign a rubric tier. Return only the JSON object.`;
+function buildUserPrompt(textTitle?: string): string {
+  const title = textTitle?.trim();
+  const titleLine = title
+    ? `The teacher has provided the text title: "${title}". Echo it back in \`textTitle\`.`
+    : 'No text title supplied — set `textTitle` to null (or extract from the page if a title is visible).';
+  return `${titleLine}\n\nTranscribe the page, then rate D / L / K independently. Return only the JSON object.`;
 }
 
 function extractJson(text: string): unknown | null {
@@ -189,7 +176,7 @@ function extractJson(text: string): unknown | null {
   try {
     return JSON.parse(trimmed);
   } catch {
-    // Fall through to brace-matching for models that wrap output.
+    // fall through
   }
   const start = trimmed.indexOf('{');
   const end = trimmed.lastIndexOf('}');

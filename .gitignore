@@ -11,9 +11,6 @@ dist/
 .env.local
 .env.*.local
 
-# Rubric PDFs are user-supplied content; don't commit them.
-public/rubric/*.pdf
-
 # IDE
 .vscode/
 .idea/

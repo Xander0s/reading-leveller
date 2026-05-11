@@ -1,11 +1,14 @@
 # Reading Leveller
 
-A Progressive Web App for Victorian primary teachers (Prep–Year 6). Photograph a page from a text and get:
+A PWA for a Victorian primary school (Prep–Year 6) that photographs a page from a text and returns a **3-dimensional demand profile** using the school's own *Resource Organisation Process* rubric:
 
-1. A **Lexile** estimate.
-2. A **three-tier rubric rating** (below / at / above standard) for a target year level, based on a rubric PDF that ships with the app.
+- **D — Decoding demand** (aligns with DIBELS)
+- **L — Language demand** (aligns with CUBED NLM)
+- **K — Knowledge demand**
 
-Built for classroom use — works on a phone, installs as a PWA, and uses Claude's vision model for OCR + levelling in a single round-trip.
+Each dimension is rated **Low / Medium / High** on the school's 3-point scale. A Lexile estimate is provided as a *secondary* signal only — used when D/L/K cannot be differentiated. The tool is **not** for "levelling" texts; it answers *"what makes this text hard, and for whom?"*
+
+The full rubric is in [docs/Resource Organisation Process 2026.pdf](docs/Resource%20Organisation%20Process%202026.pdf) and inlined in [src/lib/rubric.ts](src/lib/rubric.ts).
 
 ## Architecture
 
@@ -26,8 +29,8 @@ Built for classroom use — works on a phone, installs as a PWA, and uses Claude
 
 - **Frontend:** React 18 + TypeScript + Vite + Tailwind, PWA via `vite-plugin-pwa`
 - **Backend:** Cloudflare Pages Functions (single deploy with the frontend)
-- **AI:** Claude (`claude-sonnet-4-6` by default; override via `ANTHROPIC_MODEL` env var)
-- **Rubric:** parsed from a PDF in `public/rubric/` at build time → `src/generated/rubric.ts`
+- **AI:** Claude (`claude-sonnet-4-6` by default; override via `ANTHROPIC_MODEL`)
+- **Rubric:** hard-coded in `src/lib/rubric.ts` (~50 lines), injected into the Claude system prompt with prompt caching
 
 ## Local development
 
@@ -35,18 +38,15 @@ Built for classroom use — works on a phone, installs as a PWA, and uses Claude
 # 1. Install
 npm install
 
-# 2. Drop your rubric PDF into public/rubric/ then parse it
-npm run build:rubric
-
-# 3. Set the API key for local Pages Function dev
+# 2. Set the API key for local Pages Function dev
 cp .dev.vars.example .dev.vars
 # edit .dev.vars and paste your sk-ant-... key
 
-# 4a. Front-end only (mock the API yourself, no Claude calls)
+# 3a. Front-end only
 npm run dev
 # → http://localhost:5173
 
-# 4b. Full stack with the Pages Function proxying to Claude
+# 3b. Full stack (frontend + Pages Function → Claude)
 npm run dev:functions
 # → http://localhost:8788
 ```
@@ -57,11 +57,11 @@ npm run dev:functions
 
 One-time:
 
-1. Push this repo to GitHub.
-2. In the Cloudflare dashboard → **Workers & Pages** → **Create** → **Pages** → **Connect to Git** → pick this repo.
+1. Push this repo to GitHub (already done — [github.com/Xander0s/reading-leveller](https://github.com/Xander0s/reading-leveller)).
+2. Cloudflare dashboard → **Workers & Pages** → **Create** → **Pages** → **Connect to Git** → pick this repo.
 3. Build settings: framework preset **None**, build command `npm run build`, output directory `dist`.
 4. **Settings → Environment variables (Production):** add `ANTHROPIC_API_KEY` as an encrypted variable.
-5. (Optional) Add `ANTHROPIC_MODEL` and `ALLOWED_ORIGIN` if you want to override defaults.
+5. (Optional) Add `ANTHROPIC_MODEL` (e.g. `claude-opus-4-7`) or `ALLOWED_ORIGIN` overrides.
 
 Subsequent deploys are automatic on `git push`.
 
@@ -74,17 +74,37 @@ wrangler pages secret put ANTHROPIC_API_KEY --project-name reading-leveller
 npm run deploy
 ```
 
-## Replacing the rubric
+## Updating the rubric
 
-1. Drop a new PDF into `public/rubric/` (replacing the old one — the parser picks the first `.pdf` it finds).
-2. Run `npm run build:rubric`.
-3. Check `src/generated/rubric.ts` — if year levels or tiers are missing, tweak the regex patterns at the top of `scripts/build-rubric.mjs` and re-run.
+The rubric lives in [src/lib/rubric.ts](src/lib/rubric.ts) as a single typed constant. If the school document changes:
 
-The rubric ships as compiled-in TS data, not as a downloadable PDF — students can't access the file from the deployed site.
+1. Update the bullet lists in `RUBRIC.dimensions.*`.
+2. (Optional) Replace the reference PDF in `docs/`.
+3. `git commit && git push` — Cloudflare auto-deploys.
 
-## Year-level support
+No build script, no PDF parsing — the rubric is small enough that hand-edits are simpler and lossless.
 
-Prep (Foundation), Year 1 through Year 6. Year-level codes are `F, 1, 2, 3, 4, 5, 6`. Labels follow Victorian Curriculum 2.0 conventions.
+## Output schema
+
+```ts
+{
+  textTitle: string | null,
+  transcript: string,
+  dimensions: {
+    decoding:  { rating: 'L' | 'M' | 'H', rationale: string, evidence: string[] },
+    language:  { rating: 'L' | 'M' | 'H', rationale: string, evidence: string[] },
+    knowledge: { rating: 'L' | 'M' | 'H', rationale: string, evidence: string[] }
+  },
+  lexile: { estimate: number | null, band: string | null, note: string },
+  warnings?: string[]
+}
+```
+
+## UI conventions
+
+- **Colour palette matches the school document**: Low = red, Medium = amber, High = green. These denote *demand level* (high demand is green because it's the most challenging — matching the existing palette teachers see in the printed rubric). Don't invert.
+- Every result shows the school's summary tag format: `D: M | L: H | K: M`.
+- Lexile appears as a small grey chip below the three dimension cards — deliberately secondary.
 
 ## Notes
 
@@ -96,18 +116,15 @@ Prep (Foundation), Year 1 through Year 6. Year-level codes are `F, 1, 2, 3, 4, 5
 
 ```
 .
+├── docs/                       # Reference: original rubric PDF
 ├── functions/api/level.ts      # Cloudflare Pages Function — Claude proxy
-├── public/
-│   ├── favicon.svg
-│   └── rubric/                 # Drop PDFs here (gitignored)
-├── scripts/build-rubric.mjs    # PDF → src/generated/rubric.ts
+├── public/favicon.svg
 ├── src/
 │   ├── App.tsx
 │   ├── main.tsx
 │   ├── index.css
-│   ├── components/             # PhotoCapture, ResultsCard, LexileGauge, TierBadge, Spinner
-│   ├── generated/rubric.ts     # AUTO-GENERATED
-│   └── lib/                    # api.ts, image.ts, types.ts
+│   ├── components/             # PhotoCapture, DimensionCard, SummaryTag, LexileChip, ResultsCard, Spinner
+│   └── lib/                    # api.ts, image.ts, rubric.ts, types.ts
 ├── index.html
 ├── vite.config.ts
 ├── tailwind.config.js

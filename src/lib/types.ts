@@ -1,38 +1,31 @@
-export type Tier = 'below' | 'at' | 'above';
+export type Rating = 'L' | 'M' | 'H';
+export type Dimension = 'decoding' | 'language' | 'knowledge';
 
-export interface YearLevel {
-  code: 'F' | '1' | '2' | '3' | '4' | '5' | '6';
-  label: string;
+export interface DimensionResult {
+  rating: Rating;
+  rationale: string;
+  evidence: string[];
 }
-
-export const YEAR_LEVELS: YearLevel[] = [
-  { code: 'F', label: 'Prep (Foundation)' },
-  { code: '1', label: 'Year 1' },
-  { code: '2', label: 'Year 2' },
-  { code: '3', label: 'Year 3' },
-  { code: '4', label: 'Year 4' },
-  { code: '5', label: 'Year 5' },
-  { code: '6', label: 'Year 6' },
-];
 
 export interface LevellingRequest {
   imageBase64: string;
   imageMediaType: 'image/jpeg' | 'image/png' | 'image/webp';
-  yearLevel: YearLevel['code'];
+  textTitle?: string;
 }
 
 export interface LevellingResponse {
+  textTitle: string | null;
   transcript: string;
-  lexile: {
-    estimate: number;
-    band: string;
-    rationale: string;
+  dimensions: {
+    decoding: DimensionResult;
+    language: DimensionResult;
+    knowledge: DimensionResult;
   };
-  rubric: {
-    tier: Tier;
-    tierLabel: string;
-    rationale: string;
-    evidence: string[];
+  /** Secondary signal. Only useful when D/L/K can't be differentiated. */
+  lexile: {
+    estimate: number | null;
+    band: string | null;
+    note: string;
   };
   warnings?: string[];
 }
@@ -41,3 +34,21 @@ export interface ApiError {
   error: string;
   detail?: string;
 }
+
+export const DIMENSION_META: Record<
+  Dimension,
+  { code: 'D' | 'L' | 'K'; name: string; aligns: string }
+> = {
+  decoding: { code: 'D', name: 'Decoding demand', aligns: 'Aligns with DIBELS' },
+  language: { code: 'L', name: 'Language demand', aligns: 'Aligns with CUBED NLM' },
+  knowledge: { code: 'K', name: 'Knowledge demand', aligns: '' },
+};
+
+export const RATING_META: Record<
+  Rating,
+  { label: string; full: string; description: string }
+> = {
+  L: { label: 'L', full: 'Low', description: 'Most students will manage independently' },
+  M: { label: 'M', full: 'Medium', description: 'Some scaffolding likely needed' },
+  H: { label: 'H', full: 'High', description: 'Heavy front-loading or support required' },
+};

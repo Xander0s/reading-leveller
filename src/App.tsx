@@ -4,7 +4,7 @@ import { ResultsCard } from './components/ResultsCard';
 import { Spinner } from './components/Spinner';
 import { levelPage } from './lib/api';
 import { fileToCompressedBase64 } from './lib/image';
-import { YEAR_LEVELS, type LevellingResponse, type YearLevel } from './lib/types';
+import type { LevellingResponse } from './lib/types';
 
 type Status =
   | { kind: 'idle' }
@@ -15,7 +15,7 @@ type Status =
 
 export default function App() {
   const [file, setFile] = useState<File | null>(null);
-  const [year, setYear] = useState<YearLevel['code']>('3');
+  const [textTitle, setTextTitle] = useState('');
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
 
   async function analyse() {
@@ -27,7 +27,7 @@ export default function App() {
       const result = await levelPage({
         imageBase64: base64,
         imageMediaType: mediaType,
-        yearLevel: year,
+        textTitle: textTitle.trim() || undefined,
       });
       setStatus({ kind: 'done', result });
     } catch (e) {
@@ -40,6 +40,7 @@ export default function App() {
 
   function reset() {
     setFile(null);
+    setTextTitle('');
     setStatus({ kind: 'idle' });
   }
 
@@ -50,32 +51,32 @@ export default function App() {
       <header className="mb-6">
         <h1 className="text-2xl font-bold text-brand-900">Reading Leveller</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Photograph a page from a text. Get a Lexile estimate and a rubric-based
-          reading level aligned to Victorian Curriculum 2.0.
+          Photograph a page from a text. The app rates its{' '}
+          <span className="font-semibold">Decoding</span>,{' '}
+          <span className="font-semibold">Language</span> and{' '}
+          <span className="font-semibold">Knowledge</span> demands on the school's
+          3-point scale, with an optional Lexile.
         </p>
       </header>
 
       <div className="space-y-5">
         <div>
           <label
-            htmlFor="year"
+            htmlFor="title"
             className="block text-sm font-semibold text-slate-700"
           >
-            Target year level
+            Text title{' '}
+            <span className="font-normal text-slate-400">(optional)</span>
           </label>
-          <select
-            id="year"
-            value={year}
-            onChange={(e) => setYear(e.target.value as YearLevel['code'])}
+          <input
+            id="title"
+            type="text"
+            value={textTitle}
+            onChange={(e) => setTextTitle(e.target.value)}
             disabled={busy}
+            placeholder="e.g. The Twits, Roald Dahl"
             className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-50"
-          >
-            {YEAR_LEVELS.map((y) => (
-              <option key={y.code} value={y.code}>
-                {y.label}
-              </option>
-            ))}
-          </select>
+          />
         </div>
 
         <PhotoCapture
@@ -99,7 +100,7 @@ export default function App() {
 
         {status.kind === 'preparing' && <Spinner label="Preparing image…" />}
         {status.kind === 'analysing' && (
-          <Spinner label="Transcribing and levelling…" />
+          <Spinner label="Transcribing and rating…" />
         )}
 
         {status.kind === 'error' && (
@@ -124,7 +125,7 @@ export default function App() {
       </div>
 
       <footer className="mt-auto pt-10 text-center text-xs text-slate-400">
-        Lexile estimates are approximate and intended as a guide.
+        Ratings characterise demand, not quality or year-level fit.
       </footer>
     </div>
   );
