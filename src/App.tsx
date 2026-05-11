@@ -3,7 +3,7 @@ import { PhotoCapture } from './components/PhotoCapture';
 import { ResultsCard } from './components/ResultsCard';
 import { Spinner } from './components/Spinner';
 import { levelPage } from './lib/api';
-import { fileToCompressedBase64 } from './lib/image';
+import { filesToCompressedImages } from './lib/image';
 import type { LevellingResponse } from './lib/types';
 
 type Status =
@@ -14,19 +14,18 @@ type Status =
   | { kind: 'error'; message: string };
 
 export default function App() {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [textTitle, setTextTitle] = useState('');
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
 
   async function analyse() {
-    if (!file) return;
+    if (files.length === 0) return;
     try {
       setStatus({ kind: 'preparing' });
-      const { base64, mediaType } = await fileToCompressedBase64(file);
+      const images = await filesToCompressedImages(files);
       setStatus({ kind: 'analysing' });
       const result = await levelPage({
-        imageBase64: base64,
-        imageMediaType: mediaType,
+        images,
         textTitle: textTitle.trim() || undefined,
       });
       setStatus({ kind: 'done', result });
@@ -39,7 +38,7 @@ export default function App() {
   }
 
   function reset() {
-    setFile(null);
+    setFiles([]);
     setTextTitle('');
     setStatus({ kind: 'idle' });
   }
@@ -51,7 +50,7 @@ export default function App() {
       <header className="mb-6">
         <h1 className="text-2xl font-bold text-brand-900">Reading Leveller</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Photograph a page from a text. The app rates its{' '}
+          Photograph up to three pages from a text. The app rates its{' '}
           <span className="font-semibold">Decoding</span>,{' '}
           <span className="font-semibold">Language</span> and{' '}
           <span className="font-semibold">Knowledge</span> demands on the school's
@@ -80,25 +79,30 @@ export default function App() {
         </div>
 
         <PhotoCapture
-          onSelect={(f) => {
-            setFile(f);
-            setStatus({ kind: 'idle' });
+          files={files}
+          onChange={(next) => {
+            setFiles(next);
+            if (status.kind !== 'idle') setStatus({ kind: 'idle' });
           }}
           disabled={busy}
         />
 
-        {file && status.kind !== 'done' && (
+        {files.length > 0 && status.kind !== 'done' && (
           <button
             type="button"
             onClick={analyse}
             disabled={busy}
             className="w-full rounded-2xl bg-brand-700 px-4 py-3 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60"
           >
-            {busy ? 'Working…' : 'Analyse page'}
+            {busy
+              ? 'Working…'
+              : `Analyse ${files.length} page${files.length === 1 ? '' : 's'}`}
           </button>
         )}
 
-        {status.kind === 'preparing' && <Spinner label="Preparing image…" />}
+        {status.kind === 'preparing' && (
+          <Spinner label={`Preparing ${files.length} image${files.length === 1 ? '' : 's'}…`} />
+        )}
         {status.kind === 'analysing' && (
           <Spinner label="Transcribing and rating…" />
         )}
@@ -118,7 +122,7 @@ export default function App() {
               onClick={reset}
               className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base font-semibold text-slate-700 shadow-sm transition active:scale-[0.98]"
             >
-              Analyse another page
+              Analyse another text
             </button>
           </>
         )}

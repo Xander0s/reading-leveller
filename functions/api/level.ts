@@ -6,15 +6,23 @@ interface Env {
   ALLOWED_ORIGIN?: string;
 }
 
+type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp';
+
+interface ImageInput {
+  base64: string;
+  mediaType: ImageMediaType;
+}
+
 interface RequestBody {
-  imageBase64: string;
-  imageMediaType: 'image/jpeg' | 'image/png' | 'image/webp';
+  images: ImageInput[];
   textTitle?: string;
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
+const MAX_IMAGES = 3;
+const MAX_BASE64_PER_IMAGE = 5 * 1024 * 1024; // ~3.7 MB raw
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   if (!env.ANTHROPIC_API_KEY) {
@@ -28,20 +36,44 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
-  if (!body.imageBase64 || !body.imageMediaType) {
-    return json({ error: 'Missing imageBase64 or imageMediaType' }, 400);
+  if (!Array.isArray(body.images) || body.images.length === 0) {
+    return json({ error: 'No images provided' }, 400);
   }
 
-  if (body.imageBase64.length > 5 * 1024 * 1024) {
-    return json({ error: 'Image too large; please retake or use a smaller file' }, 413);
+  if (body.images.length > MAX_IMAGES) {
+    return json({ error: `Too many images (max ${MAX_IMAGES})` }, 400);
+  }
+
+  for (const [i, img] of body.images.entries()) {
+    if (!img?.base64 || !img.mediaType) {
+      return json({ error: `Image ${i + 1} missing base64 or mediaType` }, 400);
+    }
+    if (img.base64.length > MAX_BASE64_PER_IMAGE) {
+      return json(
+        { error: `Image ${i + 1} too large; retake or use a smaller file` },
+        413,
+      );
+    }
   }
 
   const systemPrompt = buildSystemPrompt();
-  const userPrompt = buildUserPrompt(body.textTitle);
+  const userPrompt = buildUserPrompt(body.images.length, body.textTitle);
+
+  const imageBlocks = body.images.flatMap((img, i) => [
+    { type: 'text', text: `[Page ${i + 1} of ${body.images.length}]` },
+    {
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: img.mediaType,
+        data: img.base64,
+      },
+    },
+  ]);
 
   const anthropicPayload = {
     model: env.ANTHROPIC_MODEL ?? DEFAULT_MODEL,
-    max_tokens: 2000,
+    max_tokens: 2500,
     system: [
       {
         type: 'text',
@@ -52,17 +84,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     messages: [
       {
         role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: {
-              type: 'base64',
-              media_type: body.imageMediaType,
-              data: body.imageBase64,
-            },
-          },
-          { type: 'text', text: userPrompt },
-        ],
+        content: [...imageBlocks, { type: 'text', text: userPrompt }],
       },
     ],
   };
@@ -126,19 +148,23 @@ function corsHeaders(origin?: string): Record<string, string> {
 }
 
 function buildSystemPrompt(): string {
-  return `You are an assistant for primary-school teachers in a Victorian (Australian) school, applying the school's "Resource Organisation Process" rubric to a photographed page from a text.
+  return `You are an assistant for primary-school teachers in a Victorian (Australian) school, applying the school's "Resource Organisation Process" rubric to one or more photographed pages from a text.
+
+You receive between 1 and ${MAX_IMAGES} images. **All images are from the same text** — typically sequential or representative pages. Treat them as a single combined sample when rating.
 
 Your job is to:
 
-1. **Transcribe** the visible text faithfully. Preserve paragraphs and punctuation. Skip page numbers, captions, and decorative elements. Mark illegible spans with [...]. If the page is mostly an illustration, transcribe whatever text is present and note in warnings.
+1. **Transcribe** the visible text from each page faithfully, in order. Concatenate into a single transcript with a blank line between pages. Preserve paragraphs and punctuation. Skip page numbers, captions, and decorative elements. Mark illegible spans with [...]. If a page is mostly illustration, transcribe whatever text is present and note it in warnings.
 
-2. Rate the text on **three independent demand dimensions**, each on a 3-point scale (L / M / H). Use the rubric below verbatim. **These are independent — do not let one rating influence another.** A text can be Low Decoding and High Knowledge, or vice versa. The ratings characterise demand, NOT quality, NOT year-level fit.
+2. Rate the **combined sample** on **three independent demand dimensions**, each on a 3-point scale (L / M / H). Use the rubric below verbatim. **These are independent — do not let one rating influence another.** A text can be Low Decoding and High Knowledge, or vice versa. The ratings characterise demand, NOT quality, NOT year-level fit.
 
-3. For each dimension, give a concise rationale (2–3 sentences) and 2–4 short pieces of evidence from the transcript (≤120 chars each — direct quotes preferred).
+   When pages vary in demand, rate the text as a whole — what a student reading the full text would encounter — rather than averaging or picking the worst page.
 
-4. Provide a **Lexile** estimate only as a secondary signal. The school's stance: Lexile is only useful when D/L/K cannot be differentiated. Always include the rubric's note about Lexile in the \`lexile.note\` field. If you can reasonably estimate, give a number (or "BR…L" band for very early texts); otherwise set \`lexile.estimate\` to null and explain in the note.
+3. For each dimension, give a concise rationale (2–3 sentences) and 2–4 short pieces of evidence drawn from across the pages (≤120 chars each — direct quotes preferred). Evidence can come from any of the supplied pages.
 
-5. Warnings (optional): only if the image is partial, glare-affected, mostly illustration, or the format may skew the analysis (e.g. poem, instructions, list).
+4. Provide a **Lexile** estimate only as a secondary signal. The school's stance: Lexile is only useful when D/L/K cannot be differentiated. Always include the rubric's note about Lexile in the \`lexile.note\` field. If you can reasonably estimate from the combined sample, give a number (or "BR…L" band for very early texts); otherwise set \`lexile.estimate\` to null and explain in the note.
+
+5. Warnings (optional): only if any image is partial, glare-affected, mostly illustration, or the format may skew the analysis (e.g. poem, instructions, list); or if the supplied pages don't appear to be from the same text.
 
 **Output strict JSON, no prose, no markdown fences.** Schema:
 {
@@ -163,12 +189,16 @@ ${buildRubricText()}
 `;
 }
 
-function buildUserPrompt(textTitle?: string): string {
+function buildUserPrompt(imageCount: number, textTitle?: string): string {
   const title = textTitle?.trim();
   const titleLine = title
     ? `The teacher has provided the text title: "${title}". Echo it back in \`textTitle\`.`
     : 'No text title supplied — set `textTitle` to null (or extract from the page if a title is visible).';
-  return `${titleLine}\n\nTranscribe the page, then rate D / L / K independently. Return only the JSON object.`;
+  const pageCountLine =
+    imageCount === 1
+      ? 'You have been given 1 page.'
+      : `You have been given ${imageCount} pages. Treat them as a single combined sample.`;
+  return `${pageCountLine}\n${titleLine}\n\nTranscribe each page in order, then rate D / L / K independently for the combined sample. Return only the JSON object.`;
 }
 
 function extractJson(text: string): unknown | null {

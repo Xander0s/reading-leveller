@@ -7,9 +7,17 @@ export interface DimensionResult {
   evidence: string[];
 }
 
+export type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp';
+
+export interface ImageInput {
+  base64: string;
+  mediaType: ImageMediaType;
+}
+
+export const MAX_IMAGES = 3;
+
 export interface LevellingRequest {
-  imageBase64: string;
-  imageMediaType: 'image/jpeg' | 'image/png' | 'image/webp';
+  images: ImageInput[];
   textTitle?: string;
 }
 

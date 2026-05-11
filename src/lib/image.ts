@@ -1,9 +1,9 @@
+import type { ImageInput } from './types';
+
 const MAX_DIM = 2000;
 const JPEG_QUALITY = 0.85;
 
-export async function fileToCompressedBase64(
-  file: File,
-): Promise<{ base64: string; mediaType: 'image/jpeg' }> {
+export async function fileToCompressedImage(file: File): Promise<ImageInput> {
   const bitmap = await createImageBitmap(file);
 
   const scale = Math.min(1, MAX_DIM / Math.max(bitmap.width, bitmap.height));
@@ -27,6 +27,10 @@ export async function fileToCompressedBase64(
 
   const base64 = await blobToBase64(blob);
   return { base64, mediaType: 'image/jpeg' };
+}
+
+export function filesToCompressedImages(files: File[]): Promise<ImageInput[]> {
+  return Promise.all(files.map(fileToCompressedImage));
 }
 
 function blobToBase64(blob: Blob): Promise<string> {
