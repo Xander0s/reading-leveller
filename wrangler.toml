@@ -1,0 +1,6 @@
+name = "reading-leveller"
+compatibility_date = "2025-09-01"
+pages_build_output_dir = "dist"
+
+# Pages reads ANTHROPIC_API_KEY from the dashboard (Settings → Environment
+# variables → Production). For local dev, put it in .dev.vars (gitignored).

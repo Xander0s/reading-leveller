@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(& \"C:\\\\Program Files\\\\nodejs\\\\npm.cmd\" install --save-dev --no-audit --no-fund \"@cloudflare/workers-types\" 2>&1)"
+    ]
+  }
+}

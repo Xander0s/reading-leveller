@@ -1,0 +1,37 @@
+{
+  "name": "reading-leveller",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "PWA for Victorian primary teachers: photograph a page, get a Lexile rating and a three-tier rubric assessment.",
+  "scripts": {
+    "dev": "vite",
+    "dev:functions": "wrangler pages dev -- vite",
+    "build:rubric": "node scripts/build-rubric.mjs",
+    "build": "npm run build:rubric && tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "deploy": "npm run build && wrangler pages deploy dist"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260511.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "autoprefixer": "^10.4.20",
+    "pdfjs-dist": "^4.7.76",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.14",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vite-plugin-pwa": "^0.20.5",
+    "wrangler": "^3.85.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
