@@ -106,6 +106,18 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
   if (!upstream.ok) {
     const text = await upstream.text();
+    const filter = detectContentFilter(text);
+    if (filter) {
+      return json(
+        {
+          error: 'Content filter triggered',
+          detail:
+            "The safety filter blocked this analysis. This sometimes happens with passages containing strong language, conflict, or sensitive themes. Try a different page from the same text, or photograph a longer continuous excerpt.",
+          code: 'content_filter',
+        },
+        422,
+      );
+    }
     return json({ error: 'Anthropic API error', detail: text }, upstream.status);
   }
 
@@ -160,7 +172,14 @@ Your job is to:
 
    When pages vary in demand, rate the text as a whole — what a student reading the full text would encounter — rather than averaging or picking the worst page.
 
-3. For each dimension, give a concise rationale (2–3 sentences) and 2–4 short pieces of evidence drawn from across the pages (≤120 chars each — direct quotes preferred). Evidence can come from any of the supplied pages.
+3. For each dimension, give a concise rationale (2–3 sentences) and 2–4 short pieces of evidence (≤120 chars each).
+
+   **Evidence must be descriptive characterisations of patterns, not verbatim quotes from the text.** Examples:
+   - Decoding: "Compound multi-syllabic words such as 'thunderstorm', 'workshop'"; "Greek/Latin roots: bio-, photo-, -graph"
+   - Language: "Subordinate clauses joined by 'although', 'because'"; "Passive constructions throughout the narration"
+   - Knowledge: "Assumes prior exposure to the water cycle"; "References WWII rationing without explanation"
+
+   Do NOT copy sentences or paragraphs from the text into the evidence list. The transcript already preserves the text verbatim — evidence is meant to highlight the *features* a teacher should notice.
 
 4. Provide a **Lexile** estimate only as a secondary signal. The school's stance: Lexile is only useful when D/L/K cannot be differentiated. Always include the rubric's note about Lexile in the \`lexile.note\` field. If you can reasonably estimate from the combined sample, give a number (or "BR…L" band for very early texts); otherwise set \`lexile.estimate\` to null and explain in the note.
 
@@ -199,6 +218,15 @@ function buildUserPrompt(imageCount: number, textTitle?: string): string {
       ? 'You have been given 1 page.'
       : `You have been given ${imageCount} pages. Treat them as a single combined sample.`;
   return `${pageCountLine}\n${titleLine}\n\nTranscribe each page in order, then rate D / L / K independently for the combined sample. Return only the JSON object.`;
+}
+
+function detectContentFilter(upstreamBody: string): boolean {
+  const lower = upstreamBody.toLowerCase();
+  return (
+    lower.includes('content filtering policy') ||
+    lower.includes('output blocked') ||
+    lower.includes('content_policy')
+  );
 }
 
 function extractJson(text: string): unknown | null {
